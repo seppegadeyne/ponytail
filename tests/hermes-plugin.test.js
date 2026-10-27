@@ -36,6 +36,9 @@ function python(script, env = {}) {
     env: {
       ...process.env,
       PONYTAIL_DEFAULT_MODE: '',
+      // Fork: these upstream contracts cover the always-on path; auto activation has its own tests.
+      PONYTAIL_ACTIVATION: 'always',
+      PONYTAIL_SKIP_SOURCES: '',
       XDG_CONFIG_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'ponytail-config-')),
       ...env,
     },

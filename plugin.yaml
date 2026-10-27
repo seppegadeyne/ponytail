@@ -1,10 +1,11 @@
 name: ponytail
 version: 5.3.2
-description: Lazy senior dev mode for Hermes Agent, always-on context, bundled skills, and slash commands.
+description: Lazy senior dev mode for Hermes Agent (seppegadeyne fork) - auto-activates per session on coding work, bundled skills, and slash commands.
 author: Dietrich Gebert
 provides_hooks:
   - pre_llm_call
   - pre_gateway_dispatch
+  - transform_tool_result
 provides_commands:
   - ponytail
   - ponytail-review
