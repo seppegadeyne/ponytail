@@ -13,6 +13,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def git_repo():
+    path = tempfile.mkdtemp()
+    os.mkdir(os.path.join(path, ".git"))
+    return path
+
+
 def load(settings=None, env=None):
     for key in ("PONYTAIL_DEFAULT_MODE", "PONYTAIL_ACTIVATION", "PONYTAIL_SKIP_SOURCES", "HERMES_SESSION_SOURCE"):
         os.environ.pop(key, None)
@@ -93,11 +99,13 @@ class AutoActivation(unittest.TestCase):
         mod, ctx = load()
         ctx.hooks["pre_llm_call"](session_id="s", user_message="kijk eens", conversation_history=[], platform="cli")
         hook = ctx.hooks["transform_tool_result"]
-        self.assertIsNone(hook(tool_name="read_file", args={"path": "/x/notes.md"}, result="{}", session_id="s", turn_id="t"))
-        out = hook(tool_name="patch", args={"path": "/x/app.py"}, result='{"ok":1}', session_id="s", turn_id="t")
+        repo = git_repo()
+        self.assertIsNone(hook(tool_name="read_file", args={"path": f"{repo}/app.py"}, result="{}", session_id="s", turn_id="t"))
+        self.assertIsNone(hook(tool_name="patch", args={"path": f"{repo}/notes.md"}, result="{}", session_id="s", turn_id="t"))
+        out = hook(tool_name="patch", args={"path": f"{repo}/src/app.py"}, result='{"ok":1}', session_id="s", turn_id="t")
         self.assertTrue(out.startswith('{"ok":1}'))
         self.assertIn("PONYTAIL MODE ACTIVE — level: full", out)
-        self.assertIsNone(hook(tool_name="patch", args={"path": "/x/b.py"}, result="{}", session_id="s", turn_id="t"))
+        self.assertIsNone(hook(tool_name="patch", args={"path": f"{repo}/b.py"}, result="{}", session_id="s", turn_id="t"))
         # Next turn sees the tool-result marker and does not re-inject.
         nxt = ctx.hooks["pre_llm_call"](session_id="s", user_message="verder",
                                         conversation_history=[{"role": "tool", "content": out}])
@@ -109,7 +117,18 @@ class AutoActivation(unittest.TestCase):
         hook = ctx.hooks["transform_tool_result"]
         self.assertIsNone(hook(tool_name="patch", args={"path": "a.py"}, result="{}", session_id="s", turn_id=""))
         self.assertIsNone(hook(tool_name="terminal", args={"command": "ls -la"}, result="{}", session_id="s", turn_id="t"))
-        self.assertIsNotNone(hook(tool_name="terminal", args={"command": "git diff HEAD"}, result="{}", session_id="s", turn_id="t"))
+        self.assertIsNone(hook(tool_name="terminal", args={"command": "git diff HEAD && git status"}, result="{}", session_id="s", turn_id="t"))
+        self.assertIsNotNone(hook(tool_name="terminal", args={"command": "npm run test"}, result="{}", session_id="s", turn_id="t"))
+
+    def test_tool_hook_ignores_scripts_outside_a_git_repo(self):
+        # Replay 2026-10-29: scratch helper scripts in ops/CV chats were the main false hits.
+        mod, ctx = load()
+        ctx.hooks["pre_llm_call"](session_id="s", user_message="hoi", conversation_history=[])
+        hook = ctx.hooks["transform_tool_result"]
+        scratch = tempfile.mkdtemp()
+        self.assertIsNone(hook(tool_name="write_file", args={"path": f"{scratch}/cdp.mjs"}, result="{}", session_id="s", turn_id="t"))
+        self.assertIsNone(hook(tool_name="patch", args={"path": "a.py"}, result="{}", session_id="s", turn_id="t"))  # cwd not a repo
+        self.assertIsNotNone(hook(tool_name="write_file", args={"path": f"{git_repo()}/x.ts"}, result="{}", session_id="s", turn_id="t"))
 
     def test_tool_hook_respects_skipped_source(self):
         mod, ctx = load()

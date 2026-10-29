@@ -11,9 +11,10 @@ files stay upstream so `git merge upstream/main` stays clean.
   1. the first user message or subagent goal names code (a source file, a PR, a diff,
      commit, refactor, debug, tests, codebase...), or
   2. Hermes runs inside a git repo (`TERMINAL_CWD`), or
-  3. mid-session, the first tool call that touches code (`patch`/`write_file`/`read_file`
-     on a source file, `git diff`/`gh pr`/test runners in `terminal`) carries the ruleset
-     in its result.
+  3. mid-session, the first real code edit (`patch`/`write_file` on a source file inside a
+     git repo) or a test/build/lint run in `terminal` (pytest, npm test, tsc, ruff...)
+     carries the ruleset in its result. Reads, `git diff`/`gh pr` and scratch scripts
+     outside a repo do not count: in a replay they mostly fired on CV, ops and research chats.
   Once active, a session stays active. Chats about anything else get nothing.
 - **Skipped sources** (default `cron,tool`): never auto-activated.
 - **Per-session modes.** `/ponytail lite|full|ultra|off` applies to the session it was typed

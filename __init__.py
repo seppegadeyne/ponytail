@@ -51,11 +51,12 @@ _DEV_INTENT_RE = re.compile(
     r"|pytest|vitest|jest|unit ?tests?|test ?suite|lint\w*|codebase|code ?review|implement\w*|debug\w*|compile\w*)\b",
     re.I,
 )
+# Mid-session signal: only real code work. git subcommands and reads are left out on purpose:
+# they also run in CV, wiki and ops repos and during research (replay 2026-10-29: most false hits).
 _DEV_COMMAND_RE = re.compile(
-    r"\bgit (?:commit|diff|apply|rebase|cherry-pick|log -p|show)\b|\bgh pr\b"
-    r"|\b(?:pytest|vitest|jest|npm (?:run )?test|pnpm test|cargo (?:test|build)|go test|tsc|eslint|ruff|mypy)\b"
+    r"\b(?:pytest|vitest|jest|npm (?:run )?test|pnpm (?:run )?test|cargo (?:test|build)|go test|tsc|eslint|ruff|mypy)\b"
 )
-_CODE_TOOLS = {"read_file", "write_file", "patch", "search_files"}
+_CODE_TOOLS = {"write_file", "patch"}
 
 
 def _normalize_runtime_mode(mode: str | None) -> str | None:
@@ -269,13 +270,17 @@ def _pre_llm_call(
 
 
 def _touches_code(tool_name: str, args: Any) -> bool:
+    """An edit to a source file inside a git repo, or a test/build/lint run."""
     if not isinstance(args, dict):
         return False
     if tool_name in _CODE_TOOLS:
-        target = args.get("path") or ""
-        if tool_name == "search_files":
-            target = args.get("file_glob") or ""
-        return bool(_CODE_FILE_RE.search(str(target).rstrip("*")))
+        target = str(args.get("path") or "")
+        if not _CODE_FILE_RE.search(target):
+            return False
+        path = Path(target).expanduser()
+        if not path.is_absolute():
+            path = Path(os.environ.get("TERMINAL_CWD") or os.getcwd()) / path
+        return _in_git_repo(str(path.parent))
     if tool_name == "terminal":
         return bool(_DEV_COMMAND_RE.search(str(args.get("command") or "")))
     return False
