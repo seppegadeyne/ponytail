@@ -35,6 +35,9 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Run Hermes fork tests
+        run: python3 tests/test_hermes_fork.py
+
       - name: Run benchmark selftest
         run: python3 benchmarks/agentic/run.py --selftest
 

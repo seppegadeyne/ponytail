@@ -33,7 +33,7 @@ ACTIVATIONS = {"auto", "always", "manual"}
 DEFAULT_SKIP_SOURCES = "cron,tool"
 _MAX_SESSIONS = 512
 _ctx: Any = None
-_lock = threading.Lock()
+_lock = threading.RLock()
 _session_modes: "OrderedDict[str, str]" = OrderedDict()  # set by /ponytail in that session
 _session_state: "OrderedDict[str, dict[str, Any]]" = OrderedDict()  # last decision per session
 
@@ -45,18 +45,23 @@ _CODE_EXT = (
 _CODE_FILE_RE = re.compile(rf"\.(?:{_CODE_EXT})$", re.I)
 # Dev intent in a user message or a subagent goal. Conservative on purpose: a miss is cheap
 # (the tool-call signal still activates once code is touched), a false hit costs ~700 tokens once.
+# "commit" is left out: in a replay it only added chats and read-only goals ("niets committen").
 _DEV_INTENT_RE = re.compile(
     rf"\b[\w./-]+\.(?:{_CODE_EXT})\b|github\.com/[\w.-]+/[\w.-]+/(?:pull|issues|commit|blob|compare)/"
-    r"|\b(?:pull request|PR ?#?\d+|diff|commit\w*|refactor\w*|bug ?fix\w*|stack ?trace|traceback"
+    r"|\b(?:pull request|PR ?#?\d+|diff|refactor\w*|bug ?fix\w*|stack ?trace|traceback"
     r"|pytest|vitest|jest|unit ?tests?|test ?suite|lint\w*|codebase|code ?review|implement\w*|debug\w*|compile\w*)\b",
     re.I,
 )
 # Mid-session signal: only real code work. git subcommands and reads are left out on purpose:
 # they also run in CV, wiki and ops repos and during research (replay 2026-10-29: most false hits).
 _DEV_COMMAND_RE = re.compile(
-    r"\b(?:pytest|vitest|jest|npm (?:run )?test|pnpm (?:run )?test|cargo (?:test|build)|go test|tsc|eslint|ruff|mypy)\b"
+    r"\b(?:pytest|vitest|jest|npm (?:run )?test|pnpm (?:run )?test|cargo (?:test|build)|go test)\b"
+    r"|\b(?:tsc|eslint|ruff|mypy)(?![\w-])"  # not `eslint-disable` in a grep pattern
 )
 _CODE_TOOLS = {"write_file", "patch"}
+_TOOL_BANNER = "[ponytail: coding work detected, rules active from here on]"
+# In tool results only our own banner counts: a file or DB dump that quotes the marker is not an activation.
+_TOOL_MARKER_RE = re.compile(re.escape(_TOOL_BANNER) + r"\nPONYTAIL MODE ACTIVE — level: ([a-z]+)")
 
 
 def _normalize_runtime_mode(mode: str | None) -> str | None:
@@ -202,14 +207,19 @@ def _last_marker(conversation_history: Any) -> str | None:
     for message in reversed(conversation_history or []):
         if not isinstance(message, dict):
             continue
-        for field in ("api_content", "content"):
-            text = message.get(field)
-            if field == "content" and message.get("role") != "tool":
-                continue
-            if isinstance(text, str):
-                matches = _MARKER_RE.findall(text)
-                if matches:
-                    return matches[-1] or "off"
+        content, api = message.get("content"), message.get("api_content")
+        if message.get("role") == "tool":
+            matches = _TOOL_MARKER_RE.findall(content) if isinstance(content, str) else []
+        elif isinstance(api, str):
+            # Hook context follows the sender's text; a marker the sender typed or pasted does not count.
+            own = len(content) if isinstance(content, str) and api.startswith(content) else 0
+            matches = _MARKER_RE.findall(api[own:])
+        elif isinstance(content, list):  # multimodal turn: Hermes puts hook context in a text part
+            matches = _MARKER_RE.findall("\n".join(str(p.get("text") or "") for p in content if isinstance(p, dict)))
+        else:
+            matches = []
+        if matches:
+            return matches[-1] or "off"
     return None
 
 
@@ -229,9 +239,21 @@ def _in_git_repo(path: str | None) -> bool:
     return False
 
 
+def _own_words(message: Any) -> str:
+    """The sender's own text. Bracketed blocks the harness writes or prepends (process notices,
+    delegation results, image descriptions, compaction summaries) say nothing about intent."""
+    text = message.strip() if isinstance(message, str) else ""
+    if not text.startswith("["):
+        return text
+    # Ending on "]" means all harness (reports contain "]\n" themselves); own text ending on "]" is a cheap miss.
+    if text.endswith("]") or text.startswith("[CONTEXT COMPACTION"):
+        return ""
+    return text.rpartition("]\n")[2]
+
+
 def _is_dev_session(user_message: Any) -> bool:
     """Auto activation: dev intent in the message/goal, or Hermes started inside a git repo."""
-    if isinstance(user_message, str) and _DEV_INTENT_RE.search(user_message):
+    if _DEV_INTENT_RE.search(_own_words(user_message)):
         return True
     return _in_git_repo(os.environ.get("TERMINAL_CWD") or os.getcwd())
 
@@ -248,10 +270,12 @@ def _pre_llm_call(
     sid = str(session_id or "")
     last = _last_marker(conversation_history)
     explicit = (_session_modes.get(sid) if sid else None) or _current_mode
+    # A compaction drops the marker from the history; the last decision brings the ruleset back.
+    last_or_prev = last or ((_session_state.get(sid) or {}).get("mode") if sid else None)
     if explicit:
         mode = explicit
-    elif last:
-        mode = last  # once a session is active it stays active; auto never switches it off
+    elif last_or_prev:
+        mode = last_or_prev  # once a session is active it stays active; auto never switches it off
     elif _source_skipped(platform) or _activation() == "manual":
         mode = None
     elif _activation() == "always" or _is_dev_session(user_message):
@@ -296,16 +320,17 @@ def _transform_tool_result(
         sid = str(session_id or "")
         if not sid or not turn_id or not isinstance(result, str) or _activation() != "auto":
             return None
-        state = _session_state.get(sid)
-        if state is None or state.get("mode") or _source_skipped(state.get("platform", "")):
-            return None
         if not _touches_code(str(tool_name or ""), args):
             return None
         mode = _default_mode()
         if mode == "off":
             return None
-        _remember(_session_state, sid, {**state, "mode": mode})
-        return f"{result}\n\n[ponytail: coding work detected, rules active from here on]\n{build_injected_context(mode)}"
+        with _lock:  # parallel edits in one turn: only the first carries the ruleset
+            state = _session_state.get(sid)
+            if state is None or state.get("mode") or _source_skipped(state.get("platform", "")):
+                return None
+            _remember(_session_state, sid, {**state, "mode": mode})
+        return f"{result}\n\n{_TOOL_BANNER}\n{build_injected_context(mode)}"
     except Exception:
         return None
 

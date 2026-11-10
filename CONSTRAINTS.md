@@ -1,6 +1,6 @@
 # Constraints
 
-Last reviewed: 2026-11-07
+Last reviewed: 2026-11-10
 
 ## Floor (always enforced)
 - AGENTS.md is the source of the ruleset; rule copies must stay in sync (`scripts/check-rule-copies.js`).
@@ -17,6 +17,7 @@ Last reviewed: 2026-11-07
 | Rule copies | in sync with AGENTS.md | `node scripts/check-rule-copies.js` | every change, CI |
 | Versions | all pinned equal | `node scripts/check-versions.js` | every change, CI |
 | Tests | all pass | `npm test` (CI: `.github/workflows/test.yml`) | every change, CI |
+| Hermes fork | activation contracts pass | `python3 tests/test_hermes_fork.py` | every change, CI |
 | Benchmark | selftest passes | `python3 benchmarks/agentic/run.py --selftest` | CI |
 
 ## Measured, not yet enforced (ratchets)

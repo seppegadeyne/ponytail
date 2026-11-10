@@ -9,13 +9,18 @@ files stay upstream so `git merge upstream/main` stays clean.
 - **Auto activation per session.** The ruleset is injected once (~750 tokens) only when a
   session is coding work:
   1. the first user message or subagent goal names code (a source file, a PR, a diff,
-     commit, refactor, debug, tests, codebase...), or
+     refactor, debug, tests, codebase...), or
   2. Hermes runs inside a git repo (`TERMINAL_CWD`), or
   3. mid-session, the first real code edit (`patch`/`write_file` on a source file inside a
      git repo) or a test/build/lint run in `terminal` (pytest, npm test, tsc, ruff...)
      carries the ruleset in its result. Reads, `git diff`/`gh pr` and scratch scripts
      outside a repo do not count: in a replay they mostly fired on CV, ops and research chats.
-  Once active, a session stays active. Chats about anything else get nothing.
+  Once active, a session stays active: when a compaction drops the ruleset from the history,
+  the next turn gets it again. Chats about anything else get nothing.
+- **Only the sender's own words count as intent.** Text the harness writes or prepends
+  (background-process notices, delegation results, image descriptions, compaction summaries)
+  is ignored, and in tool results only the plugin's own activation banner counts as a marker,
+  not a file or log that quotes it.
 - **Skipped sources** (default `cron,tool`): never auto-activated.
 - **Per-session modes.** `/ponytail lite|full|ultra|off` applies to the session it was typed
   in, not to the whole (multiplexed) gateway process.
