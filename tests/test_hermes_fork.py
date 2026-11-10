@@ -129,7 +129,11 @@ class AutoActivation(unittest.TestCase):
         scratch = tempfile.mkdtemp()
         self.assertIsNone(hook(tool_name="write_file", args={"path": f"{scratch}/cdp.mjs"}, result="{}", session_id="s", turn_id="t"))
         self.assertIsNone(hook(tool_name="patch", args={"path": "a.py"}, result="{}", session_id="s", turn_id="t"))  # cwd not a repo
-        self.assertIsNotNone(hook(tool_name="write_file", args={"path": f"{git_repo()}/x.ts"}, result="{}", session_id="s", turn_id="t"))
+        repo = git_repo()
+        self.assertIsNone(hook(tool_name="write_file", args={"path": f"{repo}/agents/h1/scratch/poc.php"}, result="{}", session_id="s", turn_id="t"))
+        worktree = os.path.join(repo, "scratch", "wt")  # a worktree checked out under a scratch dir is real code
+        os.makedirs(os.path.join(worktree, ".git"))
+        self.assertIsNotNone(hook(tool_name="write_file", args={"path": f"{worktree}/src/x.ts"}, result="{}", session_id="s", turn_id="t"))
 
     def test_compaction_brings_the_ruleset_back(self):
         # Audit 2026-11-10: after a compaction dropped the marker, sessions ran on without the rules.

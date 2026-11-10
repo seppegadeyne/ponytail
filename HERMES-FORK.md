@@ -14,7 +14,7 @@ files stay upstream so `git merge upstream/main` stays clean.
   3. mid-session, the first real code edit (`patch`/`write_file` on a source file inside a
      git repo) or a test/build/lint run in `terminal` (pytest, npm test, tsc, ruff...)
      carries the ruleset in its result. Reads, `git diff`/`gh pr` and scratch scripts
-     outside a repo do not count: in a replay they mostly fired on CV, ops and research chats.
+     (outside a repo, or under a `scratch`/`tmp`/`temp` dir inside one) do not count: in a replay they mostly fired on CV, ops and research chats.
   Once active, a session stays active: when a compaction drops the ruleset from the history,
   the next turn gets it again. Chats about anything else get nothing.
 - **Only the sender's own words count as intent.** Text the harness writes or prepends

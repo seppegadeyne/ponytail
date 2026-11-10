@@ -59,6 +59,8 @@ _DEV_COMMAND_RE = re.compile(
     r"|\b(?:tsc|eslint|ruff|mypy)(?![\w-])"  # not `eslint-disable` in a grep pattern
 )
 _CODE_TOOLS = {"write_file", "patch"}
+# Throwaway dirs inside a repo (audit PoCs, probes): replay 2026-11-10, half of the mid-session activations.
+_SCRATCH_DIRS = {"scratch", "tmp", "temp"}
 _TOOL_BANNER = "[ponytail: coding work detected, rules active from here on]"
 # In tool results only our own banner counts: a file or DB dump that quotes the marker is not an activation.
 _TOOL_MARKER_RE = re.compile(re.escape(_TOOL_BANNER) + r"\nPONYTAIL MODE ACTIVE — level: ([a-z]+)")
@@ -223,7 +225,7 @@ def _last_marker(conversation_history: Any) -> str | None:
     return None
 
 
-def _in_git_repo(path: str | None) -> bool:
+def _in_git_repo(path: str | None, scratch_counts: bool = True) -> bool:
     if not path:
         return False
     try:
@@ -235,7 +237,9 @@ def _in_git_repo(path: str | None) -> bool:
         if candidate == home or candidate == candidate.parent:
             return False
         if (candidate / ".git").exists():
-            return True
+            return True  # checked first: a worktree that lives in a scratch dir is still a repo
+        if not scratch_counts and candidate.name in _SCRATCH_DIRS:
+            return False
     return False
 
 
@@ -304,7 +308,7 @@ def _touches_code(tool_name: str, args: Any) -> bool:
         path = Path(target).expanduser()
         if not path.is_absolute():
             path = Path(os.environ.get("TERMINAL_CWD") or os.getcwd()) / path
-        return _in_git_repo(str(path.parent))
+        return _in_git_repo(str(path.parent), scratch_counts=False)
     if tool_name == "terminal":
         return bool(_DEV_COMMAND_RE.search(str(args.get("command") or "")))
     return False
